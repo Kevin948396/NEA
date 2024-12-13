@@ -4,218 +4,210 @@ from threading import Thread
 import time
 import math
 
+global root 
 # User credentials and roles
 USER_CREDENTIALS = {
     "admin": {"password": "admin123", "role": "admin"},
     "staff": {"password": "staff123", "role": "staff"},
 }
 
-# Queue lists
-front_queue = []
-other_queue = []
 
-# Global variables
-current_user_role = None
-ride_in_progress = False  # Track if the ride is currently in progress
-ride_start_time = 0  # The time the ride started
-ride_duration = 120  # The duration of the ride in seconds (2 minutes)
-boarding_time = 5  # Time it takes to board/unboard a rider in seconds
-riders_to_dispatch = 28  # Max number of riders per ride
-ride_time_left = ride_duration  # Time left for the current ride
+class QueueManager:
+    def __init__(self):
+        self.front_queue = []
+        self.other_queue = []
 
-# Simulate guest arrivals for the front queue
-def simulate_front_queue():
-    # Adds guests to the front queue at a rate of one every 6 seconds
-    front_queue.append(1)
-    root.after(6000, simulate_front_queue)
+    def simulate_front_queue(self, root):
+        self.front_queue.append(1)  # Add a guest to the front queue
+        root.after(6000, self.simulate_front_queue, root)  # Simulate arrival every 6 seconds
 
-# Simulate guest arrivals for the other queue at a rate of 3 seconds
-def simulate_other_queue():
-    other_queue.append(1)
-    root.after(3000, simulate_other_queue)
+    def simulate_other_queue(self, root):
+        self.other_queue.append(1)  # Add a guest to the other queue
+        root.after(3000, self.simulate_other_queue, root)  # Simulate arrival every 3 seconds
 
-# Calculate estimated queue time based on the number of riders and capacity
-def calculate_queue_time():
-    total_riders = len(front_queue) + len(other_queue)
-    riders_per_minute = 1000 / 60  # 1000 riders per hour = 16.67 riders per minute
-    estimated_time = total_riders / riders_per_minute
-    return math.ceil(estimated_time)
+    def calculate_queue_time(self):
+        total_riders = len(self.front_queue) + len(self.other_queue)
+        riders_per_minute = 1000 / 60  # 1000 riders per hour = 16.67 riders per minute
+        estimated_time = total_riders / riders_per_minute
+        return math.ceil(estimated_time)
 
-# Main Application for Logged-in Users
-def show_main_application():
-    global ride_in_progress
-    global ride_start_time
 
-    main_app = tk.Toplevel(root)
-    main_app.title("Main Dashboard")
-    main_app.geometry("600x400")
-    main_app.configure(bg="lightblue")
+class RideManager:
+    def __init__(self):
+        self.ride_in_progress = False
+        self.ride_start_time = 0
+        self.ride_duration = 120  # The duration of the ride in seconds (2 minutes)
 
-    tk.Label(main_app, text="Queue Management Dashboard", font=("Helvetica", 16, "bold"), bg="lightblue").pack(pady=20)
+    def dispatch_ride(self, front_queue, other_queue):
+        if self.ride_in_progress:
+            messagebox.showinfo("Ride in Progress", "A ride is already in progress. Please wait for it to finish.")
+            return
 
-    # Queue status display
-    def update_dashboard():
-        global ride_in_progress
-        global ride_start_time
-        global ride_time_left
+        # Dispatch riders: max 2 from front queue and 26 from other queue
+        riders_dispatched = 0
+        for _ in range(2):  # Take up to 2 from front queue
+            if front_queue:
+                front_queue.pop(0)
+                riders_dispatched += 1
+        for _ in range(26):  # Take up to 26 from other queue
+            if other_queue:
+                other_queue.pop(0)
+                riders_dispatched += 1
 
-        # Calculate the estimated queue time
-        estimated_time = calculate_queue_time()
+        if riders_dispatched > 0:
+            self.ride_in_progress = True
+            self.ride_start_time = time.time()
+            messagebox.showinfo("Ride Dispatched", f"Ride has been dispatched with {riders_dispatched} riders.")
+        else:
+            messagebox.showwarning("No Riders", "Not enough riders to dispatch a ride.")
 
-        front_queue_label.config(text=f"Front Queue: {len(front_queue)} guests")
-        other_queue_label.config(text=f"Other Queue: {len(other_queue)} guests")
-        queue_time_label.config(text=f"Estimated Queue Time: {estimated_time} mins")
-
-        if ride_in_progress:
-            remaining_time = max(0, ride_time_left - (time.time() - ride_start_time))
+    def update_ride_status(self, remaining_time_label):
+        if self.ride_in_progress:
+            elapsed_time = time.time() - self.ride_start_time
+            remaining_time = max(0, self.ride_duration - elapsed_time)
             remaining_time_label.config(text=f"Time Until Ride Finish: {round(remaining_time)} secs")
-            if remaining_time == 0:
-                ride_in_progress = False
+            if remaining_time <= 0:  # End ride
+                self.ride_in_progress = False
                 remaining_time_label.config(text="No Ride in Progress")
         else:
             remaining_time_label.config(text="No Ride in Progress")
 
-        main_app.after(1000, update_dashboard)  # Update every second
 
-    front_queue_label = tk.Label(main_app, text="Front Queue: 0 guests", font=("Helvetica", 12), bg="lightblue")
-    front_queue_label.pack(pady=10)
+class UserManager:
+    def __init__(self):
+        self.current_user_role = None
 
-    other_queue_label = tk.Label(main_app, text="Other Queue: 0 guests", font=("Helvetica", 12), bg="lightblue")
-    other_queue_label.pack(pady=10)
+    def validate_login(self, username, password):
+        if username in USER_CREDENTIALS and USER_CREDENTIALS[username]["password"] == password:
+            self.current_user_role = USER_CREDENTIALS[username]["role"]
+            return True
+        return False
 
-    queue_time_label = tk.Label(main_app, text="Estimated Queue Time: 0 mins", font=("Helvetica", 12), bg="lightblue")
-    queue_time_label.pack(pady=10)
 
-    remaining_time_label = tk.Label(main_app, text="No Ride in Progress", font=("Helvetica", 12), bg="lightblue")
-    remaining_time_label.pack(pady=10)
+class Application:
+    def __init__(self):
+        self.queue_manager = QueueManager()
+        self.ride_manager = RideManager()
+        self.user_manager = UserManager()
+        self.root = tk.Tk()
+        self.root.title("Login Screen")
+        self.root.attributes('-fullscreen', True)
+        self.root.bind('<Escape>', lambda _: self.root.attributes('-fullscreen', False))
+        self.root.configure(bg="lightblue")
+        self.login_window = None
+        self.main_app = None
+        self.username_entry = None
+        self.password_entry = None
 
-    # Admin-only controls
-    if current_user_role == "admin":
-        def manual_override():
-            # Manual override for admin to add/remove riders
-            def adjust_riders():
-                action = rider_action.get()
-                try:
-                    riders = int(rider_entry.get())
-                    if riders < 1:
-                        messagebox.showwarning("Invalid Input", "Please enter a number greater than 0.")
-                    else:
-                        if action == "Add":
-                            for _ in range(riders):
-                                front_queue.append(1)
-                                other_queue.append(1)
-                        elif action == "Remove":
-                            removed = 0
-                            for _ in range(riders):
-                                if front_queue:
-                                    front_queue.pop(0)
-                                    removed += 1
-                                elif other_queue:
-                                    other_queue.pop(0)
-                                    removed += 1
-                            messagebox.showinfo("Riders Removed", f"Successfully removed {removed} riders.")
-                        update_dashboard()
-                except ValueError:
-                    messagebox.showwarning("Invalid Input", "Please enter a valid number of riders.")
+        Thread(target=self.queue_manager.simulate_front_queue, daemon=True, args=(self.root,)).start()
+        Thread(target=self.queue_manager.simulate_other_queue, daemon=True, args=(self.root,)).start()
 
-            rider_window = tk.Toplevel(main_app)
-            rider_window.title("Add/Remove Riders")
-            rider_window.geometry("300x200")
+    def show_main_application(self):
+        self.main_app = tk.Toplevel(self.root)
+        self.main_app.title("Main Dashboard")
+        self.main_app.geometry("600x400")
+        self.main_app.configure(bg="lightblue")
 
-            tk.Label(rider_window, text="Enter number of riders to add/remove:", font=("Helvetica", 12)).pack(pady=10)
+        tk.Label(self.main_app, text="Queue Management Dashboard", font=("Helvetica", 16, "bold"), bg="lightblue").pack(pady=20)
 
-            rider_entry = tk.Entry(rider_window, font=("Helvetica", 12))
-            rider_entry.pack(pady=10)
+        # Queue status display
+        front_queue_label = tk.Label(self.main_app, text="Front Queue: 0 guests", font=("Helvetica", 12), bg="lightblue")
+        front_queue_label.pack(pady=10)
 
-            rider_action = tk.StringVar(value="Add")
-            add_radio = tk.Radiobutton(rider_window, text="Add Riders", variable=rider_action, value="Add", font=("Helvetica", 12))
-            remove_radio = tk.Radiobutton(rider_window, text="Remove Riders", variable=rider_action, value="Remove", font=("Helvetica", 12))
-            add_radio.pack(pady=5)
-            remove_radio.pack(pady=5)
+        other_queue_label = tk.Label(self.main_app, text="Other Queue: 0 guests", font=("Helvetica", 12), bg="lightblue")
+        other_queue_label.pack(pady=10)
 
-            adjust_button = tk.Button(rider_window, text="Adjust Riders", font=("Helvetica", 12), command=adjust_riders, bg="lightcoral", relief="raised", bd=4)
-            adjust_button.pack(pady=10)
+        queue_time_label = tk.Label(self.main_app, text="Estimated Queue Time: 0 mins", font=("Helvetica", 12), bg="lightblue")
+        queue_time_label.pack(pady=10)
 
-        def dispatch_ride():
-            global ride_in_progress, ride_start_time
-            if ride_in_progress:
-                messagebox.showinfo("Ride in Progress", "A ride is already in progress. Please wait for it to finish.")
-                return
+        remaining_time_label = tk.Label(self.main_app, text="No Ride in Progress", font=("Helvetica", 12), bg="lightblue")
+        remaining_time_label.pack(pady=10)
 
-            # Dispatch available riders
-            riders_dispatching = min(riders_to_dispatch, len(front_queue) + len(other_queue))
-            for _ in range(riders_dispatching):
-                if front_queue:
-                    front_queue.pop(0)
-                elif other_queue:
-                    other_queue.pop(0)
+        def update_dashboard():
+            # Update queue statistics
+            front_queue_label.config(text=f"Front Queue: {len(self.queue_manager.front_queue)} guests")
+            other_queue_label.config(text=f"Other Queue: {len(self.queue_manager.other_queue)} guests")
+            queue_time_label.config(text=f"Estimated Queue Time: {self.queue_manager.calculate_queue_time()} mins")
 
-            if riders_dispatching > 0:
-                ride_in_progress = True
-                ride_start_time = time.time()
-                messagebox.showinfo("Ride Dispatched", f"Ride has been dispatched with {riders_dispatching} riders.")
-                update_dashboard()
-            else:
-                messagebox.showwarning("No Riders", "There are no riders available to dispatch.")
+            # Check if a ride should automatically dispatch
+            if not self.ride_manager.ride_in_progress and len(self.queue_manager.front_queue) >= 2 and len(self.queue_manager.other_queue) >= 26:
+                self.ride_manager.dispatch_ride(self.queue_manager.front_queue, self.queue_manager.other_queue)
 
-        dispatch_button = tk.Button(main_app, text="Dispatch Ride", command=dispatch_ride, bg="lightgreen", font=("Helvetica", 12), relief="raised", bd=4)
-        dispatch_button.pack(pady=20)
+            # Update ride status
+            self.ride_manager.update_ride_status(remaining_time_label)
 
-        manual_override_button = tk.Button(main_app, text="Manual Override", command=manual_override, bg="lightcoral", font=("Helvetica", 12), relief="raised", bd=4)
-        manual_override_button.pack(pady=20)
+            self.main_app.after(1000, update_dashboard)  # Update dashboard every second
 
-    update_dashboard()
+        # Admin-only manual override
+        if self.user_manager.current_user_role == "admin":
+            def manual_override():
+                def adjust_riders():
+                    action = rider_action.get()
+                    try:
+                        riders = int(rider_entry.get())
+                        if riders < 1:
+                            messagebox.showwarning("Invalid Input", "Enter a number greater than 0.")
+                        else:
+                            if action == "Add":
+                                for _ in range(riders):
+                                    self.queue_manager.front_queue.append(1)
+                                    self.queue_manager.other_queue.append(1)
+                            elif action == "Remove":
+                                for _ in range(riders):
+                                    if self.queue_manager.front_queue:
+                                        self.queue_manager.front_queue.pop(0)
+                                    elif self.queue_manager.other_queue:
+                                        self.queue_manager.other_queue.pop(0)
+                            update_dashboard()
+                    except ValueError:
+                        messagebox.showwarning("Invalid Input", "Enter a valid number of riders.")
 
-# Login validation
-def validate_login():
-    global current_user_role
-    username = username_entry.get()
-    password = password_entry.get()
-    if username in USER_CREDENTIALS and USER_CREDENTIALS[username]["password"] == password:
-        current_user_role = USER_CREDENTIALS[username]["role"]
-        messagebox.showinfo("Login Successful", f"Welcome, {username}! Role: {current_user_role}")
-        login_window.destroy()
-        show_main_application()
-    else:
-        messagebox.showerror("Login Failed", "Invalid username or password.")
+                rider_window = tk.Toplevel(self.main_app)
+                rider_window.title("Add/Remove Riders")
+                rider_window.geometry("300x200")
 
-root = tk.Tk()
-root.title("Login Screen")
+                tk.Label(rider_window, text="Enter number of riders to add/remove:", font=("Helvetica", 12)).pack(pady=10)
+                rider_entry = tk.Entry(rider_window, font=("Helvetica", 12))
+                rider_entry.pack(pady=10)
 
-# Enable full screen
-root.attributes('-fullscreen', True)
+                rider_action = tk.StringVar(value="Add")
+                tk.Radiobutton(rider_window, text="Add Riders", variable=rider_action, value="Add", font=("Helvetica", 12)).pack(pady=5)
+                tk.Radiobutton(rider_window, text="Remove Riders", variable=rider_action, value="Remove", font=("Helvetica", 12)).pack(pady=5)
 
-# Exit full screen with Escape key
-def exit_fullscreen(event=None):
-    root.attributes('-fullscreen', False)
+                tk.Button(rider_window, text="Adjust Riders", command=adjust_riders, font=("Helvetica", 12), bg="lightcoral").pack(pady=10)
 
-root.bind('<Escape>', exit_fullscreen)
+            tk.Button(self.main_app, text="Manual Override", command=manual_override, font=("Helvetica", 12), bg="lightcoral").pack(pady=20)
+            tk.Button(self.main_app, text="Manual Dispatch", command=lambda: self.ride_manager.dispatch_ride(self.queue_manager.front_queue, self.queue_manager.other_queue), font=("Helvetica", 12), bg="lightgreen").pack(pady=20)
 
-# Set background color
-root.configure(bg="lightblue")
+        update_dashboard()
 
-login_window = tk.Frame(root, relief="solid", borderwidth=2, padx=20, pady=20)
-login_window.pack(pady=50)
+    def validate_login(self):
+        username = self.username_entry.get()
+        password = self.password_entry.get()
+        if self.user_manager.validate_login(username, password):
+            messagebox.showinfo("Login Successful", f"Welcome, {username}! Role: {self.user_manager.current_user_role}")
+            self.login_window.destroy()
+            self.show_main_application()
+        else:
+            messagebox.showerror("Login Failed", "Invalid username or password.")
 
-title_label = tk.Label(login_window, text="Login to Shaman Queue Management System", font=("Helvetica", 16, "bold"), fg="darkblue")
-title_label.grid(row=0, column=0, columnspan=2, pady=10)
+    def start(self):
+        self.login_window = tk.Frame(self.root, relief="solid", borderwidth=2, padx=20, pady=20)
+        self.login_window.pack(pady=50)
 
-username_label = tk.Label(login_window, text="Username:", font=("Helvetica", 12))
-username_label.grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
+        tk.Label(self.login_window, text="Login to Queue Management System", font=("Helvetica", 16, "bold"), fg="darkblue").grid(row=0, column=0, columnspan=2, pady=10)
+        tk.Label(self.login_window, text="Username:", font=("Helvetica", 12)).grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
+        self.username_entry = tk.Entry(self.login_window, font=("Helvetica", 12))
+        self.username_entry.grid(row=1, column=1, padx=10, pady=10)
+        tk.Label(self.login_window, text="Password:", font=("Helvetica", 12)).grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
+        self.password_entry = tk.Entry(self.login_window, font=("Helvetica", 12), show="*")
+        self.password_entry.grid(row=2, column=1, padx=10, pady=10)
 
-username_entry = tk.Entry(login_window, font=("Helvetica", 12))
-username_entry.grid(row=1, column=1, padx=10, pady=10)
+        tk.Button(self.login_window, text="Login", command=self.validate_login, bg="lightgreen", font=("Helvetica", 12)).grid(row=3, column=0, columnspan=2, pady=20)
 
-password_label = tk.Label(login_window, text="Password:", font=("Helvetica", 12))
-password_label.grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
+        self.root.mainloop()
 
-password_entry = tk.Entry(login_window, font=("Helvetica", 12), show="*")
-password_entry.grid(row=2, column=1, padx=10, pady=10)
 
-login_button = tk.Button(login_window, text="Login", command=validate_login, bg="lightgreen", font=("Helvetica", 12), relief="raised", bd=4)
-login_button.grid(row=3, column=0, columnspan=2, pady=20)
-
-Thread(target=lambda: simulate_front_queue(), daemon=True).start()
-Thread(target=lambda: simulate_other_queue(), daemon=True).start()
-
-root.mainloop()
+# Run the application
+app = Application()
+app.start()
